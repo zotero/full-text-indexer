@@ -66,13 +66,13 @@ async function esDelete(libraryID, key) {
 }
 
 async function processEvent(event) {
+	// Always gets only one event per invocation
 	let eventName = event.Records[0].eventName;
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
 	
 	if (/^ObjectCreated/.test(eventName)) {
 		let data = await s3.getObject({Bucket: bucket, Key: key}).promise();
-		console.log(data.Body.toString());
 		let json = JSON.parse(data.Body.toString());
 		await esIndex(json);
 	}

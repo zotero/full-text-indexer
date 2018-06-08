@@ -69,6 +69,7 @@ async function esDelete(libraryID, key) {
 }
 
 async function processEvent(event) {
+	// Always gets only one event per invocation
 	let eventName = event.Records[0].eventName;
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
@@ -87,6 +88,7 @@ async function processEvent(event) {
 exports.handler = async function (event, context) {
 	let params;
 	try {
+		// Process one DLQ message per lambda invocation
 		params = {
 			QueueUrl: config.sqsUrl,
 			MaxNumberOfMessages: 1,
@@ -110,6 +112,8 @@ exports.handler = async function (event, context) {
 		return;
 	}
 	
+	// Recursively invoke the same lambda function, if the current function
+	// invocation successfully processed a message
 	params = {
 		FunctionName: context.functionName,
 		InvocationType: 'Event',
