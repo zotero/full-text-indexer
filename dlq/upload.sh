@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-FUNCTION_NAME="bbb"
+FUNCTION_NAME=""
 
 rm index.zip
 zip -r index.zip index.js config.js node_modules
