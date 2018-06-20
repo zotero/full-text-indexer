@@ -27,6 +27,9 @@ const AWS = require('aws-sdk');
 const elasticsearch = require('elasticsearch');
 const config = require('./config');
 
+const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
+const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
+
 const es = new elasticsearch.Client({
 	host: config.es.host
 });
@@ -82,6 +85,46 @@ async function processEvent(event) {
 	}
 }
 
-exports.handler = async function (event) {
+exports.s3 = async function (event) {
 	await processEvent(event);
+};
+
+exports.dlq = async function (event, context) {
+	let params;
+	try {
+		// Process one DLQ message per lambda invocation
+		params = {
+			QueueUrl: config.sqsUrl,
+			MaxNumberOfMessages: 1,
+			VisibilityTimeout: 10,
+		};
+		let data = await SQS.receiveMessage(params).promise();
+		
+		if (!data || !data.Messages || !data.Messages.length) return;
+		
+		let message = data.Messages[0];
+		
+		await processEvent(JSON.parse(message.Body));
+		
+		params = {
+			QueueUrl: config.sqsUrl,
+			ReceiptHandle: message.ReceiptHandle,
+		};
+		await SQS.deleteMessage(params).promise();
+	}
+	catch (err) {
+		console.log(err);
+		return;
+	}
+	
+	// Recursively invoke the same lambda function, if the current function
+	// invocation successfully processed a message
+	params = {
+		FunctionName: context.functionName,
+		InvocationType: 'Event',
+		Payload: JSON.stringify(event),
+		Qualifier: context.functionVersion
+	};
+	
+	Lambda.invoke(params);
 };
