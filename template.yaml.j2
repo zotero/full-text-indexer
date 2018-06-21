@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Description: >-
-  Update item fulltext in Elasticsearch when updated in S3 (dev)
+  Update item fulltext in Elasticsearch when updated in S3 ({{ node_env }})
 Resources:
   # Main processor, invoked via S3 event
   FullTextIndexerFunction:
