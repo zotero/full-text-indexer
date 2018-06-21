@@ -1,9 +1,9 @@
-module.exports = {
-	es: {
-		host: '',
-		index: 'item_fulltext_index_write',
-		type: 'item_fulltext'
+{
+	"es": {
+		"host": "",
+		"index": "item_fulltext_index_write",
+		"type": "item_fulltext"
 	},
-	sqsURL: '',
-	s3FunctionName: ''
-};
+	"sqsURL": "",
+	"s3FunctionName": ""
+}
