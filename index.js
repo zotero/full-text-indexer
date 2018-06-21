@@ -52,6 +52,7 @@ async function esIndex(data) {
 		body: data
 	};
 	
+	console.log(`Indexing ${id}`);
 	await es.index(params);
 }
 
@@ -66,7 +67,18 @@ async function esDelete(libraryID, key) {
 		routing: libraryID,
 	};
 	
-	await es.delete(params);
+	console.log(`Deleting ${id}`);
+	try {
+		await es.delete(params);
+	}
+	catch (e) {
+		// Ignore delete if missing from Elasticsearch
+		if (e instanceof elasticsearch.errors.NotFound) {
+			console.log("Not found");
+			return;
+		}
+		throw e;
+	}
 }
 
 async function processEvent(event) {
@@ -76,7 +88,19 @@ async function processEvent(event) {
 	let key = event.Records[0].s3.object.key;
 	
 	if (/^ObjectCreated/.test(eventName)) {
-		let data = await s3.getObject({Bucket: bucket, Key: key}).promise();
+		let data;
+		try {
+			data = await s3.getObject({Bucket: bucket, Key: key}).promise();
+		}
+		catch (e) {
+			// This generally shouldn't happen, but it can if we're processing the DLQ after
+			// an extended outage and the item has already been deleted
+			if (e.statusCode == 404) {
+				console.log(`${key} not found`);
+				return;
+			}
+			throw e;
+		}
 		let json = JSON.parse(data.Body.toString());
 		await esIndex(json);
 	}
@@ -93,50 +117,50 @@ exports.s3 = async function (event) {
 exports.dlq = async function (event, context) {
 	let queueURL = config.get('sqsURL');
 	let params;
+	let numProcessed = 0;
 	try {
 		// Process one DLQ message per lambda invocation
-		params = {
-			QueueUrl: queueURL,
-			MaxNumberOfMessages: 1,
-			VisibilityTimeout: 10,
-		};
-		let data = await SQS.receiveMessage(params).promise();
-		
-		if (!data || !data.Messages || !data.Messages.length) return;
-		
-		let message = data.Messages[0];
-		
-		params = {
-			FunctionName: config.get('s3FunctionName'),
-			InvocationType: 'RequestResponse',
-			Payload: message.Body
-		};
-		
-		let result = await Lambda.invoke(params).promise();
-		if(result.FunctionError) {
-			console.log(result);
-			return;
+		while (context.getRemainingTimeInMillis() > 10000) {
+			params = {
+				QueueUrl: queueURL,
+				MaxNumberOfMessages: 1,
+				VisibilityTimeout: 10,
+			};
+			let data = await SQS.receiveMessage(params).promise();
+			
+			if (!data || !data.Messages || !data.Messages.length) {
+				console.log("No messages in queue");
+				return;
+			}
+			
+			let message = data.Messages[0];
+			
+			if (numProcessed % 10 == 0) {
+				console.log(`Processed ${numProcessed} messages`);
+			}
+			params = {
+				FunctionName: config.get('s3FunctionName'),
+				InvocationType: 'RequestResponse',
+				Payload: message.Body
+			};
+			let result = await Lambda.invoke(params).promise();
+			if (result.FunctionError) {
+				console.log(result);
+				return;
+			}
+			
+			params = {
+				QueueUrl: queueURL,
+				ReceiptHandle: message.ReceiptHandle,
+			};
+			await SQS.deleteMessage(params).promise();
+			numProcessed++;
 		}
-		
-		params = {
-			QueueUrl: queueURL,
-			ReceiptHandle: message.ReceiptHandle,
-		};
-		await SQS.deleteMessage(params).promise();
 	}
 	catch (err) {
 		console.log(err);
-		return;
 	}
-	
-	// Recursively invoke the same lambda function, if the current function
-	// invocation successfully processed a message
-	params = {
-		FunctionName: context.functionName,
-		InvocationType: 'Event',
-		Payload: JSON.stringify(event),
-		Qualifier: context.functionVersion
-	};
-	
-	Lambda.invoke(params);
+	finally {
+		console.log(`Processed ${numProcessed} message${numProcessed == 1 ? '' : 's'}`);
+	}
 };

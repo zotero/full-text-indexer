@@ -45,19 +45,17 @@ Resources:
       Runtime: nodejs8.10
       CodeUri: ./
       MemorySize: 128
-      Timeout: 10
+      Timeout: 60
       Policies:
         - SQSPollerPolicy:
             QueueName: !GetAtt FullTextIndexerDeadLetterQueue.QueueName
         - LambdaInvokePolicy:
             FunctionName: {{ main_function_name }}
-        - LambdaInvokePolicy:
-            FunctionName: {{ dlq_function_name }}
       Events:
         ProcessDLQEvent:
           Type: Schedule
           Properties:
-            Schedule: rate(10 minutes)
+            Schedule: rate(1 minute)
       Environment:
         Variables:
           NODE_ENV: {{ node_env }}
