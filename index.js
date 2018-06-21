@@ -25,26 +25,27 @@
 
 const AWS = require('aws-sdk');
 const elasticsearch = require('elasticsearch');
-const config = require('./config');
+const config = require('config');
 
 const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
 const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
 
 const es = new elasticsearch.Client({
-	host: config.es.host
+	host: config.get('es.host'),
+	requestTimeout: 3000
 });
 
-const s3 = new AWS.S3(config.s3);
+const s3 = new AWS.S3();
 
 async function esIndex(data) {
 	let id = data.libraryID + '/' + data.key;
 	
 	// Key is not needed
-	data.key = undefined;
+	delete data.key;
 	
 	let params = {
-		index: config.es.index,
-		type: config.es.type,
+		index: config.get('es.index'),
+		type: config.get('es.type'),
 		id: id,
 		// From ES 2.0 'routing' must be provided with a query, not mapping
 		routing: data.libraryID,
@@ -58,8 +59,8 @@ async function esDelete(libraryID, key) {
 	let id = libraryID + '/' + key;
 	
 	let params = {
-		index: config.es.index,
-		type: config.es.type,
+		index: config.get('es.index'),
+		type: config.get('es.type'),
 		id: id,
 		// From ES 2.0 'routing' must be provided with a query, not mapping
 		routing: libraryID,
@@ -90,11 +91,12 @@ exports.s3 = async function (event) {
 };
 
 exports.dlq = async function (event, context) {
+	let queueURL = config.get('sqsURL');
 	let params;
 	try {
 		// Process one DLQ message per lambda invocation
 		params = {
-			QueueUrl: config.sqsUrl,
+			QueueUrl: queueURL,
 			MaxNumberOfMessages: 1,
 			VisibilityTimeout: 10,
 		};
@@ -107,7 +109,7 @@ exports.dlq = async function (event, context) {
 		await processEvent(JSON.parse(message.Body));
 		
 		params = {
-			QueueUrl: config.sqsUrl,
+			QueueUrl: queueURL,
 			ReceiptHandle: message.ReceiptHandle,
 		};
 		await SQS.deleteMessage(params).promise();

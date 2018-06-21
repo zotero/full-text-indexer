@@ -1,4 +1,6 @@
 .*
 node_modules
-config.js
+config*.env
+/config/*.json
 !/.gitignore
+!production.json-sample

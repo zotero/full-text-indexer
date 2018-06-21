@@ -1,0 +1,83 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: >-
+  Update item fulltext in Elasticsearch when updated in S3 (dev)
+Resources:
+  # Main processor, invoked via S3 event
+  FullTextIndexerFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: {{ main_function_name }}
+      Handler: index.s3
+      Runtime: nodejs8.10
+      CodeUri: ./
+      MemorySize: 128
+      Timeout: 10
+      DeadLetterQueue:
+        Type: SQS
+        TargetArn: !GetAtt FullTextIndexerDeadLetterQueue.Arn
+      Policies:
+       - S3ReadPolicy:
+          BucketName: {{ bucket_name }}
+       - VPCAccessPolicy: {}
+      Events:
+        BucketEvent:
+          Type: S3
+          Properties:
+            Bucket: !Ref FullTextBucket
+            Events:
+              - 's3:ObjectCreated:*'
+              - 's3:ObjectRemoved:*'
+      VpcConfig:
+        SecurityGroupIds:
+          - {{ security_group }}
+        SubnetIds: {{ subnet_ids }}
+      Environment:
+        Variables:
+          NODE_ENV: {{ node_env }}
+  
+  # Dead Letter Queue Processor
+  FullTextIndexerDLQProcessorFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: {{ dlq_function_name }}
+      Handler: index.dlq
+      Runtime: nodejs8.10
+      CodeUri: ./
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+        - LambdaInvokePolicy:
+            FunctionName: {{ dlq_function_name }}
+        - SQSPollerPolicy:
+            QueueName: !GetAtt FullTextIndexerDeadLetterQueue.QueueName
+        - VPCAccessPolicy: {}
+      Events:
+        ProcessDLQEvent:
+          Type: Schedule
+          Properties:
+            Schedule: rate(10 minutes)
+      VpcConfig:
+        SecurityGroupIds:
+          - {{ security_group }}
+        SubnetIds: {{ subnet_ids }}
+      Environment:
+        Variables:
+          NODE_ENV: {{ node_env }}
+  
+  # S3 bucket where full text is stored
+  FullTextBucket:
+    Type: 'AWS::S3::Bucket'
+    Properties:
+      BucketName: {{ bucket_name }}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+            - ServerSideEncryptionByDefault:
+                SSEAlgorithm: AES256
+  
+  # Dead letter SQS queue, if initial index fails (e.g., if Elasticsearch is down)
+  FullTextIndexerDeadLetterQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: {{ dlq_name }}
+

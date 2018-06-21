@@ -1,5 +1,5 @@
 {
-  "name": "s3-lambda-es",
+  "name": "full-text-indexer",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -7,9 +7,10 @@
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "keywords": [],
-  "author": "",
+  "author": "Zotero",
   "license": "AGPL-3.0",
   "dependencies": {
+    "config": "^1.30.0",
     "elasticsearch": "^15.0.0"
   }
 }
