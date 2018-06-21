@@ -32,7 +32,7 @@ const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
 
 const es = new elasticsearch.Client({
 	host: config.get('es.host'),
-	requestTimeout: 3000
+	requestTimeout: 5000
 });
 
 const s3 = new AWS.S3();
