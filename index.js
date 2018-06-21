@@ -106,7 +106,17 @@ exports.dlq = async function (event, context) {
 		
 		let message = data.Messages[0];
 		
-		await processEvent(JSON.parse(message.Body));
+		params = {
+			FunctionName: config.get('s3FunctionName'),
+			InvocationType: 'RequestResponse',
+			Payload: message.Body
+		};
+		
+		let result = await Lambda.invoke(params).promise();
+		if(result.FunctionError) {
+			console.log(result);
+			return;
+		}
 		
 		params = {
 			QueueUrl: queueURL,

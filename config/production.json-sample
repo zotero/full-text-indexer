@@ -4,5 +4,6 @@ module.exports = {
 		index: 'item_fulltext_index_write',
 		type: 'item_fulltext'
 	},
-	sqsURL: ''
+	sqsURL: '',
+	s3FunctionName: ''
 };
