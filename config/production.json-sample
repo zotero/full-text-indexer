@@ -4,6 +4,10 @@
 		"index": "item_fulltext_index_write",
 		"type": "item_fulltext"
 	},
+	"redis": {
+        "host": "",
+        "port": ""
+    },
 	"sqsURL": "",
 	"s3FunctionName": ""
 }

@@ -27,6 +27,7 @@ const AWS = require('aws-sdk');
 const elasticsearch = require('elasticsearch');
 const config = require('config');
 const zlib = require('zlib');
+const redis = require('redis');
 
 const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
 const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
@@ -34,6 +35,11 @@ const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
 const es = new elasticsearch.Client({
 	host: config.get('es.host'),
 	requestTimeout: 5000
+});
+
+const redisClient = redis.createClient({
+	host: config.get('redis').host,
+	port: config.get('redis').port
 });
 
 const s3 = new AWS.S3();
@@ -82,11 +88,23 @@ async function esDelete(libraryID, key) {
 	}
 }
 
+async function getKeyState(key) {
+	return new Promise(function(resolve, reject) {
+		redisClient.get('s3:' + key, function (err, res) {
+			if(err) return reject(err);
+			resolve(res);
+		});
+	});
+}
+
 async function processEvent(event) {
 	// Always gets only one event per invocation
 	let eventName = event.Records[0].eventName;
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
+	
+	let state = getKeyState(key);
+	if(state === '2') return;
 	
 	if (/^ObjectCreated/.test(eventName)) {
 		let data;

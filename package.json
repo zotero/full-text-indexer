@@ -11,6 +11,7 @@
   "license": "AGPL-3.0",
   "dependencies": {
     "config": "^1.30.0",
-    "elasticsearch": "^15.0.0"
+    "elasticsearch": "^15.0.0",
+    "redis": "^2.8.0"
   }
 }
