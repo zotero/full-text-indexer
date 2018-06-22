@@ -26,6 +26,7 @@
 const AWS = require('aws-sdk');
 const elasticsearch = require('elasticsearch');
 const config = require('config');
+const zlib = require('zlib');
 
 const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
 const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
@@ -101,7 +102,15 @@ async function processEvent(event) {
 			}
 			throw e;
 		}
-		let json = JSON.parse(data.Body.toString());
+		
+		let json = data.Body;
+		
+		if(data.ContentType === 'application/gzip') {
+			json = zlib.unzipSync(json);
+		}
+		
+		json = JSON.parse(json.toString());
+		
 		await esIndex(json);
 	}
 	else if (/^ObjectRemoved/.test(eventName)) {
