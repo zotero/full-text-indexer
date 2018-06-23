@@ -37,10 +37,7 @@ const es = new elasticsearch.Client({
 	requestTimeout: 5000
 });
 
-const redisClient = redis.createClient({
-	host: config.get('redis').host,
-	port: config.get('redis').port
-});
+const redisClient = redis.createClient(config.get('redis'));
 
 const s3 = new AWS.S3();
 
@@ -103,7 +100,7 @@ async function processEvent(event) {
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
 	
-	let state = getKeyState(key);
+	let state = await getKeyState(key);
 	if(state === '2') return;
 	
 	if (/^ObjectCreated/.test(eventName)) {
