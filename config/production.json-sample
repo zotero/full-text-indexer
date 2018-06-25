@@ -6,7 +6,8 @@
 	},
 	"redis": {
         "host": "",
-        "port": ""
+        "port": "",
+        "prefix": ""
     },
 	"sqsURL": "",
 	"s3FunctionName": ""
