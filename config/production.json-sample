@@ -5,10 +5,10 @@
 		"type": "item_fulltext"
 	},
 	"redis": {
-        "host": "",
-        "port": "",
-        "prefix": ""
-    },
+		"host": "",
+		"port": "",
+		"prefix": ""
+	},
 	"sqsURL": "",
 	"s3FunctionName": ""
 }
