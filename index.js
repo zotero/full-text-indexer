@@ -99,6 +99,7 @@ async function processEvent(event) {
 	let eventName = event.Records[0].eventName;
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
+	let eTagEvent = event.Records[0].s3.object.eTag;
 	
 	let state = await getKeyState(key);
 	if(state === '2') return;
@@ -116,6 +117,13 @@ async function processEvent(event) {
 				return;
 			}
 			throw e;
+		}
+		
+		// S3 returns eTag wrapped in quotes
+		let eTagObject = data.ETag.slice(1, -1);
+		
+		if (eTagEvent !== eTagObject) {
+			throw new Error('Event eTag differs from S3 object eTag');
 		}
 		
 		let json = data.Body;
