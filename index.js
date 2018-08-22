@@ -37,7 +37,7 @@ const es = new elasticsearch.Client({
 	requestTimeout: 5000
 });
 
-const redisClient = redis.createClient(config.get('redis'));
+var redisClient;
 
 const s3 = new AWS.S3();
 
@@ -86,6 +86,9 @@ async function esDelete(libraryID, key) {
 }
 
 async function getKeyState(key) {
+	if (!redisClient) {
+		redisClient = redis.createClient(config.get('redis'));
+	}
 	return new Promise(function(resolve, reject) {
 		redisClient.get('s3:' + key, function (err, res) {
 			if(err) return reject(err);
