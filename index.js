@@ -28,6 +28,7 @@ const elasticsearch = require('elasticsearch');
 const config = require('config');
 const zlib = require('zlib');
 const redis = require('redis');
+const RedisClustr = require('redis-clustr');
 
 const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
 const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
@@ -87,7 +88,15 @@ async function esDelete(libraryID, key) {
 
 async function getKeyState(key) {
 	if (!redisClient) {
-		redisClient = redis.createClient(config.get('redis'));
+		redisClient = new RedisClustr({
+			servers: [{host: config.get('redis').host, port: config.get('redis').port}],
+			createClient: function (port, host, options) {
+				return redis.createClient(port, host, options);
+			},
+			redisOptions: {
+				prefix: config.get('redis').prefix
+			}
+		});
 	}
 	return new Promise(function(resolve, reject) {
 		redisClient.get('s3:' + key, function (err, res) {

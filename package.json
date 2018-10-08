@@ -12,6 +12,7 @@
   "dependencies": {
     "config": "^1.30.0",
     "elasticsearch": "^15.0.0",
-    "redis": "^2.8.0"
+    "redis": "^2.8.0",
+    "redis-clustr": "^1.6.0"
   }
 }
