@@ -38,6 +38,11 @@ const es = new elasticsearch.Client({
 	requestTimeout: 5000
 });
 
+const esOld = new elasticsearch.Client({
+	host: config.get('esOld.host'),
+	requestTimeout: 5000
+});
+
 var redisClient;
 
 const s3 = new AWS.S3();
@@ -48,41 +53,76 @@ async function esIndex(data) {
 	// Key is not needed
 	delete data.key;
 	
-	let params = {
-		index: config.get('es.index'),
-		type: config.get('es.type'),
+	console.log(`Indexing ${id}`);
+	
+	try {
+		await es.index({
+			index: config.get('es.index'),
+			type: config.get('es.type'),
+			id: id,
+			version: data.version,
+			version_type: 'external_gt',
+			routing: data.libraryID,
+			body: data
+		});
+	}
+	catch (e) {
+		// Ignore version conflict
+		if (e instanceof elasticsearch.errors.Conflict) {
+			console.log('Version conflict');
+		} else {
+			throw e;
+		}
+	}
+	
+	// Old ES index
+	await esOld.index({
+		index: config.get('esOld.index'),
+		type: config.get('esOld.type'),
 		id: id,
-		// From ES 2.0 'routing' must be provided with a query, not mapping
 		routing: data.libraryID,
 		body: data
-	};
-	
-	console.log(`Indexing ${id}`);
-	await es.index(params);
+	});
 }
 
 async function esDelete(libraryID, key) {
 	let id = libraryID + '/' + key;
 	
-	let params = {
-		index: config.get('es.index'),
-		type: config.get('es.type'),
-		id: id,
-		// From ES 2.0 'routing' must be provided with a query, not mapping
-		routing: libraryID,
-	};
-	
 	console.log(`Deleting ${id}`);
+	
 	try {
-		await es.delete(params);
+		await es.delete({
+			index: config.get('es.index'),
+			type: config.get('es.type'),
+			id: id,
+			routing: libraryID,
+		});
 	}
 	catch (e) {
 		// Ignore delete if missing from Elasticsearch
 		if (e instanceof elasticsearch.errors.NotFound) {
-			console.log("Not found");
-			return;
+			console.log('Not found');
+		} else {
+			throw e;
 		}
-		throw e;
+	}
+	
+	// Old ES index
+	try {
+		await esOld.delete({
+			index: config.get('esOld.index'),
+			type: config.get('esOld.type'),
+			id: id,
+			routing: libraryID,
+		});
+	}
+	catch (e) {
+		// Ignore delete if missing from Elasticsearch
+		if (e instanceof elasticsearch.errors.NotFound) {
+			console.log('Not found');
+		} else {
+			throw e;
+		}
 	}
 }
 
