@@ -27,8 +27,6 @@ const AWS = require('aws-sdk');
 const elasticsearch = require('elasticsearch');
 const config = require('config');
 const zlib = require('zlib');
-const redis = require('redis');
-const RedisClustr = require('redis-clustr');
 
 const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
 const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
@@ -37,13 +35,6 @@ const es = new elasticsearch.Client({
 	host: config.get('es.host'),
 	requestTimeout: 5000
 });
-
-const esOld = new elasticsearch.Client({
-	host: config.get('esOld.host'),
-	requestTimeout: 5000
-});
-
-var redisClient;
 
 const s3 = new AWS.S3();
 
@@ -74,15 +65,6 @@ async function esIndex(data) {
 			throw e;
 		}
 	}
-	
-	// Old ES index
-	await esOld.index({
-		index: config.get('esOld.index'),
-		type: config.get('esOld.type'),
-		id: id,
-		routing: data.libraryID,
-		body: data
-	});
 }
 
 async function esDelete(libraryID, key) {
@@ -106,44 +88,6 @@ async function esDelete(libraryID, key) {
 			throw e;
 		}
 	}
-	
-	// Old ES index
-	try {
-		await esOld.delete({
-			index: config.get('esOld.index'),
-			type: config.get('esOld.type'),
-			id: id,
-			routing: libraryID,
-		});
-	}
-	catch (e) {
-		// Ignore delete if missing from Elasticsearch
-		if (e instanceof elasticsearch.errors.NotFound) {
-			console.log('Not found');
-		} else {
-			throw e;
-		}
-	}
-}
-
-async function getKeyState(key) {
-	if (!redisClient) {
-		redisClient = new RedisClustr({
-			servers: [{host: config.get('redis').host, port: config.get('redis').port}],
-			createClient: function (port, host, options) {
-				return redis.createClient(port, host, options);
-			},
-			redisOptions: {
-				prefix: config.get('redis').prefix
-			}
-		});
-	}
-	return new Promise(function(resolve, reject) {
-		redisClient.get('s3:' + key, function (err, res) {
-			if(err) return reject(err);
-			resolve(res);
-		});
-	});
 }
 
 async function processEvent(event) {
@@ -152,9 +96,6 @@ async function processEvent(event) {
 	let bucket = event.Records[0].s3.bucket.name;
 	let key = event.Records[0].s3.object.key;
 	let eTagEvent = event.Records[0].s3.object.eTag;
-	
-	let state = await getKeyState(key);
-	if(state === '2') return;
 	
 	if (/^ObjectCreated/.test(eventName)) {
 		let data;
