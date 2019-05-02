@@ -116,7 +116,7 @@ async function processEvent(event) {
 		let eTagObject = data.ETag.slice(1, -1);
 		
 		if (eTagEvent !== eTagObject) {
-			throw new Error('Event eTag differs from S3 object eTag');
+			throw new Error(`Event eTag differs from S3 object eTag for ${key} (${eTagEvent} != ${eTagObject}`);
 		}
 		
 		let json = data.Body;
