@@ -76,3 +76,8 @@ Resources:
     Properties:
       QueueName: {{ dlq_name }}
 
+Outputs:
+  LambdaSecurityGroup:
+    Value: {{ security_group }}
+    Export:
+      Name: {{ main_function_name }}SecurityGroupID
