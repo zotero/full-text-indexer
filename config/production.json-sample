@@ -1,12 +1,12 @@
 {
 	"es": {
 		"host": "",
-		"index": "item_fulltext_index_write",
+		"index": "item_fulltext_index",
 		"type": "item_fulltext"
 	},
 	"esOld": {
 		"host": "",
-		"index": "item_fulltext_index_write",
+		"index": "item_fulltext_index",
 		"type": "item_fulltext"
 	},
 	"redis": {
