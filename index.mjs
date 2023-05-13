@@ -143,7 +143,7 @@ export const dlq = async function (event, context) {
 	let params;
 	let numProcessed = 0;
 	try {
-		while (context.getRemainingTimeInMillis() > 10000) {
+		while (context.getRemainingTimeInMillis() > 6000) {
 			params = {
 				QueueUrl: queueURL,
 				MaxNumberOfMessages: 1,
