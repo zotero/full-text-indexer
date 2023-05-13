@@ -171,6 +171,15 @@ export const dlq = async function (event, context) {
 			let result = await lambda.send(command);
 			if (result.FunctionError) {
 				let payload = Buffer.from(result.Payload).toString();
+				
+				// Continue on ETag mismatch, since full text just might have changed since this
+				// event was queued
+				let { errorMessage } = JSON.parse(payload);
+				if (errorMessage && errorMessage.includes('Event eTag differs from S3 object eTag')) {
+					console.warn(errorMessage);
+					continue;
+				}
+				
 				console.warn(payload);
 				return;
 			}
