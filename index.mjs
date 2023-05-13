@@ -23,20 +23,19 @@
  ***** END LICENSE BLOCK *****
  */
 
-const AWS = require('aws-sdk');
-const elasticsearch = require('elasticsearch');
-const config = require('config');
-const zlib = require('zlib');
+import { S3Client, GetObjectCommand } from "@aws-sdk/client-s3";
+import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from "@aws-sdk/client-sqs";
+import { Client as ESClient, errors as esErrors } from '@elastic/elasticsearch';
+import config from 'config';
+import zlib from 'zlib';
 
-const SQS = new AWS.SQS({apiVersion: '2012-11-05'});
-const Lambda = new AWS.Lambda({apiVersion: '2015-03-31'});
-
-const es = new elasticsearch.Client({
-	host: config.get('es.host'),
+const es = new ESClient({
+	node: config.get('es.host'),
 	requestTimeout: 5000
 });
 
-const s3 = new AWS.S3();
+const s3Client = new S3Client();
 
 async function esIndex(data) {
 	let id = data.libraryID + '/' + data.key;
@@ -49,7 +48,6 @@ async function esIndex(data) {
 	try {
 		await es.index({
 			index: config.get('es.index'),
-			type: config.get('es.type'),
 			id: id,
 			version: data.version,
 			version_type: 'external_gt',
@@ -59,7 +57,7 @@ async function esIndex(data) {
 	}
 	catch (e) {
 		// Ignore version conflict
-		if (e instanceof elasticsearch.errors.Conflict) {
+		if (e instanceof esErrors.ResponseError && e.statusCode == 409) {
 			console.log('Version conflict');
 		} else {
 			throw e;
@@ -75,14 +73,13 @@ async function esDelete(libraryID, key) {
 	try {
 		await es.delete({
 			index: config.get('es.index'),
-			type: config.get('es.type'),
 			id: id,
 			routing: libraryID,
 		});
 	}
 	catch (e) {
 		// Ignore delete if missing from Elasticsearch
-		if (e instanceof elasticsearch.errors.NotFound) {
+		if (e instanceof esErrors.ResponseError && e.statusCode == 404) {
 			console.log('Not found');
 		} else {
 			throw e;
@@ -100,12 +97,13 @@ async function processEvent(event) {
 	if (/^ObjectCreated/.test(eventName)) {
 		let data;
 		try {
-			data = await s3.getObject({Bucket: bucket, Key: key}).promise();
+			let command = new GetObjectCommand({Bucket: bucket, Key: key});
+			data = await s3Client.send(command);
 		}
 		catch (e) {
 			// This generally shouldn't happen, but it can if we're processing the DLQ after
 			// an extended outage and the item has already been deleted
-			if (e.statusCode == 404) {
+			if (e.name == "NoSuchKey") {
 				console.log(`${key} not found`);
 				return;
 			}
@@ -119,13 +117,11 @@ async function processEvent(event) {
 			throw new Error(`Event eTag differs from S3 object eTag for ${key} (${eTagEvent} != ${eTagObject}`);
 		}
 		
-		let json = data.Body;
-		
-		if(data.ContentType === 'application/gzip') {
-			json = zlib.unzipSync(json);
-		}
-		
-		json = JSON.parse(json.toString());
+		let json = JSON.parse(
+			data.ContentType === 'application/gzip'
+				? zlib.unzipSync(await data.Body.transformToByteArray())
+				: await data.Body.transformToString()
+		);
 		
 		await esIndex(json);
 	}
@@ -135,23 +131,26 @@ async function processEvent(event) {
 	}
 }
 
-exports.s3 = async function (event) {
+export const s3 = async function (event) {
 	await processEvent(event);
 };
 
-exports.dlq = async function (event, context) {
+export const dlq = async function (event, context) {
+	let sqs = new SQSClient();
+	let lambda = new LambdaClient();
+	
 	let queueURL = config.get('sqsURL');
 	let params;
 	let numProcessed = 0;
 	try {
-		// Process one DLQ message per lambda invocation
 		while (context.getRemainingTimeInMillis() > 10000) {
 			params = {
 				QueueUrl: queueURL,
 				MaxNumberOfMessages: 1,
 				VisibilityTimeout: 10,
 			};
-			let data = await SQS.receiveMessage(params).promise();
+			let command = new ReceiveMessageCommand(params);
+			let data = await sqs.send(command);
 			
 			if (!data || !data.Messages || !data.Messages.length) {
 				console.log("No messages in queue");
@@ -168,9 +167,11 @@ exports.dlq = async function (event, context) {
 				InvocationType: 'RequestResponse',
 				Payload: message.Body
 			};
-			let result = await Lambda.invoke(params).promise();
+			command = new InvokeCommand(params);
+			let result = await lambda.send(command);
 			if (result.FunctionError) {
-				console.log(result);
+				let payload = Buffer.from(result.Payload).toString();
+				console.warn(payload);
 				return;
 			}
 			
@@ -178,12 +179,13 @@ exports.dlq = async function (event, context) {
 				QueueUrl: queueURL,
 				ReceiptHandle: message.ReceiptHandle,
 			};
-			await SQS.deleteMessage(params).promise();
+			command = new DeleteMessageCommand(params);
+			await sqs.send(command);
 			numProcessed++;
 		}
 	}
 	catch (err) {
-		console.log(err);
+		console.error(err);
 	}
 	finally {
 		console.log(`Processed ${numProcessed} message${numProcessed == 1 ? '' : 's'}`);

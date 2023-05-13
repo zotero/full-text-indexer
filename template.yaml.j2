@@ -9,7 +9,7 @@ Resources:
     Properties:
       FunctionName: {{ main_function_name }}
       Handler: index.s3
-      Runtime: nodejs8.10
+      Runtime: nodejs18.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 10
@@ -42,7 +42,7 @@ Resources:
     Properties:
       FunctionName: {{ dlq_function_name }}
       Handler: index.dlq
-      Runtime: nodejs8.10
+      Runtime: nodejs18.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 60
