@@ -36,6 +36,14 @@ Resources:
         Variables:
           NODE_ENV: {{ node_env }}
   
+  IndexerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FullTextIndexerFunction}
+      RetentionInDays: 14
+  
   # Dead Letter Queue Processor
   FullTextIndexerDLQProcessorFunction:
     Type: 'AWS::Serverless::Function'
@@ -59,6 +67,14 @@ Resources:
       Environment:
         Variables:
           NODE_ENV: {{ node_env }}
+  
+  DLQLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FullTextIndexerDLQProcessorFunction}
+      RetentionInDays: 14
   
   # S3 bucket where full text is stored
   FullTextBucket:
