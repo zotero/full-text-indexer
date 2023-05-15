@@ -91,6 +91,7 @@ Resources:
     Type: 'AWS::SQS::Queue'
     Properties:
       QueueName: {{ dlq_name }}
+      MessageRetentionPeriod: 1209600
 
 Outputs:
   LambdaSecurityGroup:
