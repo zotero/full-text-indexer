@@ -152,6 +152,10 @@ export const s3 = async function (event) {
 	await processEvent(event);
 };
 
+export const indexDLQMessage = async function (event) {
+	await processEvent(event);
+};
+
 export const dlq = async function (event, context) {
 	let sqs = new SQSClient();
 	let lambda = new LambdaClient();
@@ -180,7 +184,7 @@ export const dlq = async function (event, context) {
 				console.log(`Processed ${numProcessed} messages`);
 			}
 			params = {
-				FunctionName: config.get('s3FunctionName'),
+				FunctionName: config.get('dlqIndexerFunctionName'),
 				InvocationType: 'RequestResponse',
 				Payload: message.Body
 			};

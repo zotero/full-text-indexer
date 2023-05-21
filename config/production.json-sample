@@ -15,6 +15,6 @@
 		"prefix": ""
 	},
 	"sqsURL": "",
-	"s3FunctionName": "",
+	"dlqIndexerFunctionName": "",
 	"s3Bucket" : ""
 }

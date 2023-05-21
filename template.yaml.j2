@@ -44,6 +44,36 @@ Resources:
         Fn::Sub: /aws/lambda/${FullTextIndexerFunction}
       RetentionInDays: 14
   
+  # Copy of main processor invoked via DLQ with dedicated concurrency
+  FullTextIndexerDLQIndexerFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: {{ dlq_indexer_function_name }}
+      Handler: index.indexDLQMessage
+      Runtime: nodejs18.x
+      CodeUri: ./
+      MemorySize: 128
+      Timeout: 10
+      Policies:
+       - S3ReadPolicy:
+          BucketName: {{ bucket_name }}
+       - VPCAccessPolicy: {}
+      VpcConfig:
+        SecurityGroupIds:
+          - {{ security_group }}
+        SubnetIds: {{ subnet_ids }}
+      Environment:
+        Variables:
+          NODE_ENV: {{ node_env }}
+  
+  DLQIndexerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/{{ dlq_indexer_function_name }}
+      RetentionInDays: 14
+  
   # Dead Letter Queue Processor
   FullTextIndexerDLQProcessorFunction:
     Type: 'AWS::Serverless::Function'
@@ -58,7 +88,7 @@ Resources:
         - SQSPollerPolicy:
             QueueName: !GetAtt FullTextIndexerDeadLetterQueue.QueueName
         - LambdaInvokePolicy:
-            FunctionName: {{ main_function_name }}
+            FunctionName: {{ dlq_indexer_function_name }}
       Events:
         ProcessDLQEvent:
           Type: Schedule
