@@ -15,5 +15,7 @@
 		"prefix": ""
 	},
 	"sqsURL": "",
-	"s3FunctionName": ""
+	"s3FunctionName": "",
+	"s3Bucket" : "",
+	"s3BatchSize": 100
 }

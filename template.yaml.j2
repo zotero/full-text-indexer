@@ -68,6 +68,48 @@ Resources:
         Variables:
           NODE_ENV: {{ node_env }}
   
+  # Async re-indexer of libraries deleted from ES
+  FullTextReindexerFunction:
+    Type: 'AWS::Serverless::Function'
+    Properties:
+      FunctionName: {{ reindexer_function_name }}
+      Handler: index.reindexLibrary
+      Runtime: nodejs18.x
+      CodeUri: ./
+      MemorySize: 128
+      Timeout: 900
+      Policies:
+        - SQSSendMessagePolicy:
+            QueueName: !GetAtt FullTextIndexerDeadLetterQueue.QueueName
+        - S3ReadPolicy:
+            BucketName: {{ bucket_name }}
+        - Statement:
+            - Effect: 'Allow'
+              Action:
+                - 's3:PutObject'
+                - 's3:PutObjectAcl'
+                - 's3:DeleteObject'
+              Resource: !Sub 'arn:aws:s3:::{{ bucket_name }}/*'
+      Environment:
+        Variables:
+          NODE_ENV: {{ node_env }}
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Queue: !GetAtt FullTextReIndexerQueue.Arn
+            BatchSize: 1
+            FunctionResponseTypes:
+              - ReportBatchItemFailures
+
+  ReindexerLogGroup:
+    Type: AWS::Logs::LogGroup
+    DeletionPolicy: Retain
+    Properties:
+      LogGroupName:
+        Fn::Sub: /aws/lambda/${FullTextReindexerFunction}
+      RetentionInDays: 14
+
   DLQLogGroup:
     Type: AWS::Logs::LogGroup
     DeletionPolicy: Retain
@@ -91,6 +133,14 @@ Resources:
     Type: 'AWS::SQS::Queue'
     Properties:
       QueueName: {{ dlq_name }}
+      MessageRetentionPeriod: 1209600
+
+  # Queue with requests to re-index specific libraries
+  FullTextReIndexerQueue:
+    Type: 'AWS::SQS::Queue'
+    Properties:
+      QueueName: {{ reindexer_queue_name }}
+      VisibilityTimeout: 900
       MessageRetentionPeriod: 1209600
 
 Outputs:
