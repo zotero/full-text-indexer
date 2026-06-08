@@ -140,7 +140,9 @@ Resources:
     Type: 'AWS::SQS::Queue'
     Properties:
       QueueName: {{ reindexer_queue_name }}
-      VisibilityTimeout: 900
+      # Must stay above the FullTextReindexerFunction Timeout (900) so a message
+      # can't resurface to a second invocation while the first is still running
+      VisibilityTimeout: 960
       MessageRetentionPeriod: 1209600
 
 Outputs:
