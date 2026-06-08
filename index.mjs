@@ -47,6 +47,9 @@ const es = new ESClient({
 
 const s3Client = new S3Client();
 
+// Number of S3 keys to list (and checkpoint) per reindex loop iteration. AWS caps MaxKeys at 1000.
+const REINDEX_S3_BATCH_SIZE = 100;
+
 async function esIndex(data) {
 	let id = data.libraryID + '/' + data.key;
 	
@@ -245,7 +248,7 @@ export const reindexLibrary = async (event, context) => {
 	let listObjectsInput = {
 		Bucket: config.get('s3Bucket'),
 		Prefix: `${libraryID}/`,
-		MaxKeys: config.get('s3BatchSize')
+		MaxKeys: REINDEX_S3_BATCH_SIZE
 	};
 	if (reindexStatus.lastKey) {
 		// Start from the last processed key if this is not the first run
