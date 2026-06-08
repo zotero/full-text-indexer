@@ -223,7 +223,7 @@ export const reindexLibrary = async (event, context) => {
 	const libraryID = body.libraryID;
 	const reindexStatusKey = `${libraryID}/_reindex_status`;
 	let reindexStatus = {};
-	// Try to fetch reindex status file from s3. If there was an unfinished reindexing run,
+	// Try to fetch reindex status file from S3. If there was an unfinished reindexing run,
 	// it will exist.
 	try {
 		let reindexStatusFile = await s3Client.send(new GetObjectCommand({
@@ -257,7 +257,7 @@ export const reindexLibrary = async (event, context) => {
 	const listObjectsCommand = new ListObjectsV2Command(listObjectsInput);
 	let forceStop = false;
 	console.log(`Reindexing library ${libraryID} starting from key: ${reindexStatus.lastKey || "-"}`);
-	// Keep fetching all items in s3 while we have the continuation token
+	// Keep fetching all items in S3 while we have the continuation token
 	do {
 		// Stop if there is a chance of timeout
 		if (context.getRemainingTimeInMillis() < 6000) {
@@ -266,7 +266,7 @@ export const reindexLibrary = async (event, context) => {
 		}
 		var { Contents, IsTruncated, NextContinuationToken } = await s3Client.send(listObjectsCommand);
 
-		// Create fake s3 events that will be added to DLQ as if previously
+		// Create fake S3 events that will be added to DLQ as if previously
 		// failed events for re-indexing.
 		let sqsEvents = Contents.map((entry) => {
 			const message = {
@@ -291,7 +291,7 @@ export const reindexLibrary = async (event, context) => {
 		listObjectsCommand.input.ContinuationToken = NextContinuationToken;
 
 		let sqsSendEventPromises = [];
-		// Group fake s3 events in batches of 10 (current max for SQS send batch command) and send to sqs
+		// Group fake S3 events in batches of 10 (current max for SQS send batch command) and send to SQS
 		while (sqsEvents.length > 0) {
 			let batch = sqsEvents.splice(0, 10);
 			const command = new SendMessageBatchCommand({
@@ -308,7 +308,7 @@ export const reindexLibrary = async (event, context) => {
 		let lastKey = Contents[Contents.length - 1].Key;
 		reindexStatus.lastKey = lastKey;
 
-		// Save reindexStatus to s3 for the next lambda run, if it's needed
+		// Save reindexStatus to S3 for the next lambda run, if it's needed
 		await s3Client.send(new PutObjectCommand({
 			Bucket: config.get('s3Bucket'),
 			Key: reindexStatusKey,
