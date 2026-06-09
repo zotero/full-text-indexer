@@ -25,11 +25,10 @@
 
 import { S3Client,
 	GetObjectCommand,
-	ListObjectsV2Command,
-	PutObjectCommand,
-	DeleteObjectCommand
+	ListObjectsV2Command
 } from "@aws-sdk/client-s3";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
+import { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
 import {
 	SQSClient,
 	ReceiveMessageCommand,
@@ -47,8 +46,28 @@ const es = new ESClient({
 
 const s3Client = new S3Client();
 
+const ddbClient = new DynamoDBClient();
+
 // Number of S3 keys to list (and checkpoint) per reindex loop iteration. AWS caps MaxKeys at 1000.
 const REINDEX_S3_BATCH_SIZE = 100;
+
+// Per-library full-text state lives in a shared DynamoDB table (single-table design: partition
+// key `pk` is an entity-typed key like `LIBRARY#<id>`, sort key `sk` names the record). The
+// library's state item (sk `STATE`) carries a `deindexed` flag; a missing item or absent/false
+// flag means the library is not deindexed (the common case) and is indexed normally. A library is
+// "deindexed" when its content has been removed from Elasticsearch (e.g., purged because the
+// owner doesn't use the web library). The flag is maintained mainly by an external
+// purge/reconciliation script; dataserver clears it (deindexed=false) when a library is queued
+// for reindexing. We skip indexing new content while deindexed; the content stays in S3, so a
+// later reindex restores everything.
+async function isLibraryDeindexed(libraryID) {
+	let resp = await ddbClient.send(new GetItemCommand({
+		TableName: config.get('dynamoTable'),
+		Key: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'STATE' } },
+		ProjectionExpression: 'deindexed'
+	}));
+	return resp.Item?.deindexed?.BOOL === true;
+}
 
 async function esIndex(data) {
 	let id = data.libraryID + '/' + data.key;
@@ -107,11 +126,15 @@ async function processEvent(event) {
 	let key = event.Records[0].s3.object.key;
 	let eTagEvent = event.Records[0].s3.object.eTag;
 	
-	// Ignore events triggered by _reindex_status file
-	if (key.includes("_reindex_status")) {
-		return;
-	}
 	if (/^ObjectCreated/.test(eventName)) {
+		// Skip libraries that have been removed from the index (content stays in S3 for
+		// later reindexing). The key is "<libraryID>/<itemKey>".
+		let libraryID = key.split('/')[0];
+		if (await isLibraryDeindexed(libraryID)) {
+			console.log(`Library ${libraryID} is deindexed; skipping ${key}`);
+			return;
+		}
+
 		let data;
 		try {
 			let command = new GetObjectCommand({Bucket: bucket, Key: key});
@@ -225,27 +248,19 @@ export const dlq = async function (event, context) {
 export const reindexLibrary = async (event, context) => {
 	const body = JSON.parse(event.Records[0].body);
 	const libraryID = body.libraryID;
-	const reindexStatusKey = `${libraryID}/_reindex_status`;
+	const reindexStateKey = { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' } };
 	let reindexStatus = {};
-	// Try to fetch reindex status file from S3. If there was an unfinished reindexing run,
-	// it will exist.
-	try {
-		let reindexStatusFile = await s3Client.send(new GetObjectCommand({
-			Bucket: config.get('s3Bucket'),
-			Key: reindexStatusKey
-		}));
-		let reindexStatusBody = await reindexStatusFile.Body.transformToString();
-		reindexStatus = JSON.parse(reindexStatusBody);
-		console.log("Reindex status file found", reindexStatus);
+	// Resume from a prior unfinished run if a checkpoint exists in the state table
+	let reindexStateResp = await ddbClient.send(new GetItemCommand({
+		TableName: config.get('dynamoTable'),
+		Key: reindexStateKey
+	}));
+	if (reindexStateResp.Item) {
+		reindexStatus.lastKey = reindexStateResp.Item.lastKey?.S;
+		console.log("Reindex checkpoint found", reindexStatus);
 	}
-	catch (e) {
-		console.log("No reindex status file");
-		// Otherwise, this is a fresh run, so we add it.
-		await s3Client.send(new PutObjectCommand({
-			Bucket: config.get('s3Bucket'),
-			Key: reindexStatusKey,
-			Body: JSON.stringify(reindexStatus)
-		}));
+	else {
+		console.log("No reindex checkpoint");
 	}
 
 	let sqs = new SQSClient();
@@ -312,11 +327,10 @@ export const reindexLibrary = async (event, context) => {
 		let lastKey = Contents[Contents.length - 1].Key;
 		reindexStatus.lastKey = lastKey;
 
-		// Save reindexStatus to S3 for the next lambda run, if it's needed
-		await s3Client.send(new PutObjectCommand({
-			Bucket: config.get('s3Bucket'),
-			Key: reindexStatusKey,
-			Body: JSON.stringify(reindexStatus)
+		// Save the checkpoint for the next lambda run, if it's needed
+		await ddbClient.send(new PutItemCommand({
+			TableName: config.get('dynamoTable'),
+			Item: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' }, lastKey: { S: lastKey } }
 		}));
 	} while (IsTruncated);
 
@@ -329,9 +343,9 @@ export const reindexLibrary = async (event, context) => {
 			}]
 		};
 	}
-	// Reindexing has been finished, delete the temp reindex status file
-	await s3Client.send(new DeleteObjectCommand({
-		Bucket: config.get('s3Bucket'),
-		Key: reindexStatusKey
+	// Reindexing has finished; delete the checkpoint
+	await ddbClient.send(new DeleteItemCommand({
+		TableName: config.get('dynamoTable'),
+		Key: reindexStateKey
 	}));
 };

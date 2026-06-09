@@ -16,5 +16,6 @@
 	},
 	"sqsURL": "",
 	"dlqIndexerFunctionName": "",
-	"s3Bucket" : ""
+	"s3Bucket" : "",
+	"dynamoTable": ""
 }

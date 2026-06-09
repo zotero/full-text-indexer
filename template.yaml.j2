@@ -20,6 +20,8 @@ Resources:
       Policies:
        - S3ReadPolicy:
           BucketName: {{ bucket_name }}
+       - DynamoDBReadPolicy:
+          TableName: {{ table_name }}
        - VPCAccessPolicy: {}
       Events:
         BucketEvent:
@@ -58,6 +60,8 @@ Resources:
       Policies:
        - S3ReadPolicy:
           BucketName: {{ bucket_name }}
+       - DynamoDBReadPolicy:
+          TableName: {{ table_name }}
        - VPCAccessPolicy: {}
       VpcConfig:
         SecurityGroupIds:
@@ -114,13 +118,8 @@ Resources:
             QueueName: !GetAtt FullTextIndexerDeadLetterQueue.QueueName
         - S3ReadPolicy:
             BucketName: {{ bucket_name }}
-        - Statement:
-            - Effect: 'Allow'
-              Action:
-                - 's3:PutObject'
-                - 's3:PutObjectAcl'
-                - 's3:DeleteObject'
-              Resource: !Sub 'arn:aws:s3:::{{ bucket_name }}/*'
+        - DynamoDBCrudPolicy:
+            TableName: {{ table_name }}
       Environment:
         Variables:
           NODE_ENV: {{ node_env }}
@@ -175,6 +174,28 @@ Resources:
       # can't resurface to a second invocation while the first is still running
       VisibilityTimeout: 960
       MessageRetentionPeriod: 1209600
+
+  # Single-table store for full-text indexing state, keyed by entity-typed pk (e.g. "LIBRARY#<id>")
+  # and sk. Each library's "STATE" item holds a `deindexed` flag; the indexer skips indexing
+  # libraries flagged deindexed. Maintained by the external purge/reconciliation script and by
+  # dataserver (which clears the flag on reindex). NOTE: the indexing functions run in-VPC, so the
+  # VPC needs a DynamoDB gateway endpoint to reach this table.
+  FullTextIndexingTable:
+    Type: 'AWS::DynamoDB::Table'
+    DeletionPolicy: Retain
+    Properties:
+      TableName: {{ table_name }}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: pk
+          AttributeType: S
+        - AttributeName: sk
+          AttributeType: S
+      KeySchema:
+        - AttributeName: pk
+          KeyType: HASH
+        - AttributeName: sk
+          KeyType: RANGE
 
 Outputs:
   LambdaSecurityGroup:
