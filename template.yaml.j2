@@ -9,7 +9,7 @@ Resources:
     Properties:
       FunctionName: {{ main_function_name }}
       Handler: index.s3
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 10
@@ -50,7 +50,7 @@ Resources:
     Properties:
       FunctionName: {{ dlq_indexer_function_name }}
       Handler: index.indexDLQMessage
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 10
@@ -80,7 +80,7 @@ Resources:
     Properties:
       FunctionName: {{ dlq_function_name }}
       Handler: index.dlq
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 60
@@ -104,7 +104,7 @@ Resources:
     Properties:
       FunctionName: {{ reindexer_function_name }}
       Handler: index.reindexLibrary
-      Runtime: nodejs18.x
+      Runtime: nodejs22.x
       CodeUri: ./
       MemorySize: 128
       Timeout: 900
