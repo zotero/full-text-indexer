@@ -97,7 +97,7 @@ Resources:
         SQSEvent:
           Type: SQS
           Properties:
-            Queue: !GetAtt FullTextReIndexerQueue.Arn
+            Queue: !GetAtt FullTextReindexerQueue.Arn
             BatchSize: 1
             FunctionResponseTypes:
               - ReportBatchItemFailures
@@ -136,7 +136,7 @@ Resources:
       MessageRetentionPeriod: 1209600
 
   # Queue with requests to re-index specific libraries
-  FullTextReIndexerQueue:
+  FullTextReindexerQueue:
     Type: 'AWS::SQS::Queue'
     Properties:
       QueueName: {{ reindexer_queue_name }}
