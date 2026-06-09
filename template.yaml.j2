@@ -12,7 +12,8 @@ Resources:
       Runtime: nodejs22.x
       CodeUri: ./
       MemorySize: 128
-      Timeout: 10
+      Timeout: 25
+      ReservedConcurrentExecutions: 35
       DeadLetterQueue:
         Type: SQS
         TargetArn: !GetAtt FullTextIndexerDeadLetterQueue.Arn
