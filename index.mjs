@@ -28,7 +28,7 @@ import { S3Client,
 	ListObjectsV2Command
 } from "@aws-sdk/client-s3";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
-import { DynamoDBClient, GetItemCommand, PutItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, GetItemCommand, PutItemCommand, UpdateItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
 import {
 	SQSClient,
 	ReceiveMessageCommand,
@@ -343,7 +343,15 @@ export const reindexLibrary = async (event, context) => {
 			}]
 		};
 	}
-	// Reindexing has finished; delete the checkpoint
+	// Refill done: clear the `reindexing` flag so dataserver stops reporting the rebuild.
+	// REMOVE (absent = not reindexing), and UpdateItem so `deindexed`/other attrs survive.
+	await ddbClient.send(new UpdateItemCommand({
+		TableName: config.get('dynamoTable'),
+		Key: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'STATE' } },
+		UpdateExpression: 'REMOVE reindexing'
+	}));
+
+	// Delete the reindex checkpoint
 	await ddbClient.send(new DeleteItemCommand({
 		TableName: config.get('dynamoTable'),
 		Key: reindexStateKey
