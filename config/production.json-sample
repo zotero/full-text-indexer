@@ -14,7 +14,8 @@
 		"port": "",
 		"prefix": ""
 	},
-	"sqsURL": "",
+	"dlqURL": "",
+	"reindexIndexQueueURL": "",
 	"dlqIndexerFunctionName": "",
 	"s3Bucket" : "",
 	"dynamoTable": ""

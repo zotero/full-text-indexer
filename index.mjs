@@ -25,7 +25,7 @@
 
 import { S3Client,
 	GetObjectCommand,
-	ListObjectsV2Command
+	paginateListObjectsV2
 } from "@aws-sdk/client-s3";
 import { LambdaClient, InvokeCommand } from "@aws-sdk/client-lambda";
 import { DynamoDBClient, GetItemCommand, PutItemCommand, UpdateItemCommand, DeleteItemCommand } from "@aws-sdk/client-dynamodb";
@@ -69,20 +69,24 @@ async function isLibraryDeindexed(libraryID) {
 	return resp.Item?.deindexed?.BOOL === true;
 }
 
-async function esIndex(data) {
+async function esIndex(data, reindex = false) {
 	let id = data.libraryID + '/' + data.key;
-	
+
 	// Key is not needed
 	delete data.key;
-	
+
 	console.log(`Indexing ${id}`);
-	
+
 	try {
 		await es.index({
 			index: config.get('es.index'),
 			id: id,
 			version: data.version,
-			version_type: 'external_gt',
+			// Live indexing uses external_gt to drop stale/out-of-order events. A reindex is an
+			// authoritative refill, so it uses external_gte: it re-applies the stored content (and
+			// restores a just-deleted doc at the same version) but still yields to a newer live
+			// version, so a concurrent upload is never clobbered.
+			version_type: reindex ? 'external_gte' : 'external_gt',
 			routing: data.libraryID,
 			body: data
 		});
@@ -119,7 +123,7 @@ async function esDelete(libraryID, key) {
 	}
 }
 
-async function processEvent(event) {
+async function processEvent(event, reindex = false) {
 	// Always gets only one event per invocation
 	let eventName = event.Records[0].eventName;
 	let bucket = event.Records[0].s3.bucket.name;
@@ -163,7 +167,7 @@ async function processEvent(event) {
 				: await data.Body.transformToString()
 		);
 		
-		await esIndex(json);
+		await esIndex(json, reindex);
 	}
 	else if (/^ObjectRemoved/.test(eventName)) {
 		let parts = key.split('/');
@@ -183,7 +187,7 @@ export const dlq = async function (event, context) {
 	let sqs = new SQSClient();
 	let lambda = new LambdaClient();
 	
-	let queueURL = config.get('sqsURL');
+	let queueURL = config.get('dlqURL');
 	let params;
 	let numProcessed = 0;
 	try {
@@ -264,29 +268,33 @@ export const reindexLibrary = async (event, context) => {
 	}
 
 	let sqs = new SQSClient();
-	let listObjectsInput = {
-		Bucket: config.get('s3Bucket'),
-		Prefix: `${libraryID}/`,
-		MaxKeys: REINDEX_S3_BATCH_SIZE
-	};
-	if (reindexStatus.lastKey) {
-		// Start from the last processed key if this is not the first run
-		listObjectsInput.StartAfter = reindexStatus.lastKey;
-	}
-	const listObjectsCommand = new ListObjectsV2Command(listObjectsInput);
+	// Paginate with the SDK helper so continuation is handled internally. Reusing a single
+	// ListObjectsV2Command and mutating ContinuationToken paginates unreliably (overlapping and
+	// skipped pages), which double-enqueues some keys and drops others.
+	const pages = paginateListObjectsV2(
+		{ client: s3Client, pageSize: REINDEX_S3_BATCH_SIZE },
+		{
+			Bucket: config.get('s3Bucket'),
+			Prefix: `${libraryID}/`,
+			// Resume from the last checkpointed key if a prior run didn't finish
+			...(reindexStatus.lastKey ? { StartAfter: reindexStatus.lastKey } : {})
+		}
+	);
 	let forceStop = false;
 	console.log(`Reindexing library ${libraryID} starting from key: ${reindexStatus.lastKey || "-"}`);
-	// Keep fetching all items in S3 while we have the continuation token
-	do {
-		// Stop if there is a chance of timeout
+	for await (const page of pages) {
+		// Stop if there's a chance of timeout; the checkpoint lets the next invocation resume
 		if (context.getRemainingTimeInMillis() < 6000) {
 			forceStop = true;
 			break;
 		}
-		var { Contents, IsTruncated, NextContinuationToken } = await s3Client.send(listObjectsCommand);
+		const Contents = page.Contents ?? [];
+		if (!Contents.length) {
+			continue;
+		}
 
-		// Create fake S3 events that will be added to DLQ as if previously
-		// failed events for re-indexing.
+		// Enqueue each item as a synthetic S3 event on the reindex index queue, where the
+		// consumer indexes it the same way as a live S3 event
 		let sqsEvents = Contents.map((entry) => {
 			const message = {
 				Records:
@@ -307,23 +315,20 @@ export const reindexLibrary = async (event, context) => {
 			};
 		});
 
-		listObjectsCommand.input.ContinuationToken = NextContinuationToken;
-
 		let sqsSendEventPromises = [];
 		// Group fake S3 events in batches of 10 (current max for SQS send batch command) and send to SQS
 		while (sqsEvents.length > 0) {
 			let batch = sqsEvents.splice(0, 10);
 			const command = new SendMessageBatchCommand({
-				QueueUrl: config.get('sqsURL'),
+				QueueUrl: config.get('reindexIndexQueueURL'),
 				Entries: batch
 			});
 			sqsSendEventPromises.push(sqs.send(command));
 		}
 		// Wait for all batches to be added
 		await Promise.all(sqsSendEventPromises);
-		
-		// Record the last added key to the queue, so that the next lambda knows where
-		// to start processing from
+
+		// Record the last added key, so the next invocation knows where to resume
 		let lastKey = Contents[Contents.length - 1].Key;
 		reindexStatus.lastKey = lastKey;
 
@@ -332,7 +337,7 @@ export const reindexLibrary = async (event, context) => {
 			TableName: config.get('dynamoTable'),
 			Item: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' }, lastKey: { S: lastKey } }
 		}));
-	} while (IsTruncated);
+	}
 
 	if (forceStop) {
 		console.log("Forced stop");
@@ -356,4 +361,29 @@ export const reindexLibrary = async (event, context) => {
 		TableName: config.get('dynamoTable'),
 		Key: reindexStateKey
 	}));
+};
+
+// SQS event-source consumer for the reindex index queue. Each record's body is a synthetic S3
+// event produced by reindexLibrary; index it via the shared processEvent path. Per-record
+// failures are reported so only they get retried.
+export const reindexIndex = async function (event) {
+	const batchItemFailures = [];
+	for (const record of event.Records) {
+		try {
+			// reindex=true: authoritative refill (external_gte) — restores stored content but
+			// won't overwrite a newer live version
+			await processEvent(JSON.parse(record.body), true);
+		}
+		catch (e) {
+			// The object changed since reindexLibrary listed it, so the live S3-event pipeline has
+			// already (re)indexed it; treat as done rather than retry the stale event forever.
+			if (e.message && e.message.includes('Event eTag differs from S3 object eTag')) {
+				console.warn(e.message);
+				continue;
+			}
+			console.error(e);
+			batchItemFailures.push({ itemIdentifier: record.messageId });
+		}
+	}
+	return { batchItemFailures };
 };
