@@ -254,6 +254,9 @@ export const reindexLibrary = async (event, context) => {
 	const libraryID = body.libraryID;
 	const reindexStateKey = { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' } };
 	let reindexStatus = {};
+	// Running count of objects enqueued (the indexable total), carried across resume cycles and
+	// recorded on the STATE item at the end so the API can tell "fully indexed" from "rebuilding".
+	let enqueued = 0;
 	// Resume from a prior unfinished run if a checkpoint exists in the state table
 	let reindexStateResp = await ddbClient.send(new GetItemCommand({
 		TableName: config.get('dynamoTable'),
@@ -261,6 +264,9 @@ export const reindexLibrary = async (event, context) => {
 	}));
 	if (reindexStateResp.Item) {
 		reindexStatus.lastKey = reindexStateResp.Item.lastKey?.S;
+		if (reindexStateResp.Item.count?.N) {
+			enqueued = Number(reindexStateResp.Item.count.N);
+		}
 		console.log("Reindex checkpoint found", reindexStatus);
 	}
 	else {
@@ -292,6 +298,7 @@ export const reindexLibrary = async (event, context) => {
 		if (!Contents.length) {
 			continue;
 		}
+		enqueued += Contents.length;
 
 		// Enqueue each item as a synthetic S3 event on the reindex index queue, where the
 		// consumer indexes it the same way as a live S3 event
@@ -335,7 +342,7 @@ export const reindexLibrary = async (event, context) => {
 		// Save the checkpoint for the next lambda run, if it's needed
 		await ddbClient.send(new PutItemCommand({
 			TableName: config.get('dynamoTable'),
-			Item: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' }, lastKey: { S: lastKey } }
+			Item: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'REINDEX' }, lastKey: { S: lastKey }, count: { N: String(enqueued) } }
 		}));
 	}
 
@@ -348,12 +355,15 @@ export const reindexLibrary = async (event, context) => {
 			}]
 		};
 	}
-	// Refill done: clear the `reindexing` flag so dataserver stops reporting the rebuild.
-	// REMOVE (absent = not reindexing), and UpdateItem so `deindexed`/other attrs survive.
+	// Refill done: record the indexable total (objects enqueued) and clear the `reindexing`
+	// flag.  indexableCount lets the API report "indexed" once ES matches what's actually in
+	// S3, even if stored DB rows exceed that for some reason (e.g., failed S3 writes). REMOVE
+	// drops `reindexing`; UpdateItem so `deindexed`/other attrs survive.
 	await ddbClient.send(new UpdateItemCommand({
 		TableName: config.get('dynamoTable'),
 		Key: { pk: { S: `LIBRARY#${libraryID}` }, sk: { S: 'STATE' } },
-		UpdateExpression: 'REMOVE reindexing'
+		UpdateExpression: 'SET indexableCount = :n REMOVE reindexing',
+		ExpressionAttributeValues: { ':n': { N: String(enqueued) } }
 	}));
 
 	// Delete the reindex checkpoint
